@@ -30,6 +30,10 @@ input double InpSLATRMult          = 1.2;
 input double InpTP1RR              = 1.0;
 input double InpTP2RR              = 1.8;
 input double InpTP1ClosePercent    = 50.0;
+input int    InpMASlopeLookback    = 3;
+input double InpATRMinDistMult     = 0.2;
+input double InpATRMaxDistMult     = 1.2;
+input int    InpMomentumLookback   = 5;
 
 enum ModeState
 {
@@ -53,6 +57,10 @@ enum SkipReason
    SKIP_SAMEZONE,
    SKIP_RANGE,
    SKIP_TREND_OFF,
+   SKIP_ALIGN,
+   SKIP_SLOPE,
+   SKIP_DISTANCE,
+   SKIP_MOMENTUM,
    SKIP_INVALID_HANDLE,
    SKIP_NO_SIGNAL,
    SKIP_TRADE_DISABLED,
@@ -77,7 +85,7 @@ double tp1Price = 0.0;
 double tp2Price = 0.0;
 ModeState currentMode = MODE_RANGE;
 
-long skipCounts[14];
+long skipCounts[18];
 
 double PipsToPoints(double pips)
 {
@@ -256,13 +264,17 @@ void LogSkipSummary()
 {
    if(!InpDebug)
       return;
-   PrintFormat("Skip summary: spread=%ld time=%ld cooldown=%ld samezone=%ld range=%ld trend_off=%ld invalid_handle=%ld no_signal=%ld trade_disabled=%ld position_exists=%ld order_fail=%ld lot_invalid=%ld stop_level=%ld",
+   PrintFormat("Skip summary: spread=%ld time=%ld cooldown=%ld samezone=%ld range=%ld trend_off=%ld align=%ld slope=%ld distance=%ld momentum=%ld invalid_handle=%ld no_signal=%ld trade_disabled=%ld position_exists=%ld order_fail=%ld lot_invalid=%ld stop_level=%ld",
                skipCounts[SKIP_SPREAD],
                skipCounts[SKIP_TIME],
                skipCounts[SKIP_COOLDOWN],
                skipCounts[SKIP_SAMEZONE],
                skipCounts[SKIP_RANGE],
                skipCounts[SKIP_TREND_OFF],
+               skipCounts[SKIP_ALIGN],
+               skipCounts[SKIP_SLOPE],
+               skipCounts[SKIP_DISTANCE],
+               skipCounts[SKIP_MOMENTUM],
                skipCounts[SKIP_INVALID_HANDLE],
                skipCounts[SKIP_NO_SIGNAL],
                skipCounts[SKIP_TRADE_DISABLED],
@@ -282,6 +294,10 @@ string SkipReasonText(SkipReason reason)
       case SKIP_SAMEZONE: return "SameZone";
       case SKIP_RANGE: return "RangeBlock";
       case SKIP_TREND_OFF: return "TrendGateOff";
+      case SKIP_ALIGN: return "AlignFail";
+      case SKIP_SLOPE: return "SlopeFail";
+      case SKIP_DISTANCE: return "DistanceFail";
+      case SKIP_MOMENTUM: return "MomentumFail";
       case SKIP_INVALID_HANDLE: return "InvalidHandle";
       case SKIP_NO_SIGNAL: return "NoSignal";
       case SKIP_TRADE_DISABLED: return "TradeDisabled";
@@ -302,6 +318,43 @@ bool PrepareEntry(bool isLong, double ema21, double ema50)
    return (close2 > ema21 || close2 > ema50) && close1 < ema21;
 }
 
+bool MASlopeOK(bool isLong, double current, double past)
+{
+   if(isLong)
+      return current > past;
+   return current < past;
+}
+
+bool AlignmentOK(bool isLong, double ema21, double ema50)
+{
+   if(isLong)
+      return ema21 > ema50;
+   return ema21 < ema50;
+}
+
+bool DistanceOK(double price, double ema50, double atr)
+{
+   if(atr <= 0.0)
+      return false;
+   double distance = MathAbs(price - ema50);
+   return (distance >= atr * InpATRMinDistMult && distance <= atr * InpATRMaxDistMult);
+}
+
+bool MomentumOK(bool isLong)
+{
+   double highest = -DBL_MAX;
+   double lowest = DBL_MAX;
+   for(int i = 1; i <= InpMomentumLookback; i++)
+   {
+      highest = MathMax(highest, iHigh(_Symbol, PERIOD_M15, i));
+      lowest = MathMin(lowest, iLow(_Symbol, PERIOD_M15, i));
+   }
+   double close1 = iClose(_Symbol, PERIOD_M15, 1);
+   if(isLong)
+      return close1 > highest;
+   return close1 < lowest;
+}
+
 void UpdateTP1Tracking()
 {
    if(!HasOpenPosition())
@@ -315,6 +368,8 @@ void UpdateTP1Tracking()
       return;
    if(PositionSelect(_Symbol))
    {
+      if(PositionGetInteger(POSITION_MAGIC) != InpMagicNumber)
+         return;
       long type = PositionGetInteger(POSITION_TYPE);
       double price = (type == POSITION_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       bool hit = (type == POSITION_TYPE_BUY) ? (price >= tp1Price) : (price <= tp1Price);
@@ -402,9 +457,11 @@ void OnTick()
    bool ema50Ok = true;
    double ema21 = GetIndicatorValue(handleEma21M15, 1, ema21Ok);
    double ema50 = GetIndicatorValue(handleEma50M15, 1, ema50Ok);
+   bool ema50PastOk = true;
+   double ema50Past = GetIndicatorValue(handleEma50M15, 1 + InpMASlopeLookback, ema50PastOk);
    bool atrOk = true;
    double atr = GetIndicatorValue(handleAtrM15, 1, atrOk);
-   if((!ema21Ok || !ema50Ok || !atrOk) && skip == SKIP_NONE)
+   if((!ema21Ok || !ema50Ok || !atrOk || !ema50PastOk) && skip == SKIP_NONE)
       skip = SKIP_INVALID_HANDLE;
 
    bool signal = false;
@@ -415,7 +472,15 @@ void OnTick()
       entryFlags = signal ? "Pullback" : "";
       if(!signal)
          skip = SKIP_NO_SIGNAL;
-      if(signal && !SameZoneOK(isLong ? ask : bid))
+      if(skip == SKIP_NONE && signal && !AlignmentOK(isLong, ema21, ema50))
+         skip = SKIP_ALIGN;
+      if(skip == SKIP_NONE && signal && !MASlopeOK(isLong, ema50, ema50Past))
+         skip = SKIP_SLOPE;
+      if(skip == SKIP_NONE && signal && !DistanceOK(isLong ? ask : bid, ema50, atr))
+         skip = SKIP_DISTANCE;
+      if(skip == SKIP_NONE && signal && !MomentumOK(isLong))
+         skip = SKIP_MOMENTUM;
+      if(skip == SKIP_NONE && signal && !SameZoneOK(isLong ? ask : bid))
          skip = SKIP_SAMEZONE;
    }
    else if(skip == SKIP_NONE && HasOpenPosition())
