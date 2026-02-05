@@ -3,7 +3,7 @@
 //|                                        Auto FX Trading Tool     |
 //+------------------------------------------------------------------+
 #property copyright ""
-#property version   "1.13"
+#property version   "1.14"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -26,12 +26,14 @@ input int    InpEMA200Period       = 200;
 input int    InpEMA21Period        = 21;
 input int    InpEMA50Period        = 50;
 input int    InpATRPeriod          = 14;
-input double InpSLATRMult          = 1.1;
-input double InpTP1RR              = 0.9;
-input double InpTP2RR              = 2.2;
-input double InpTP1ClosePercent    = 40.0;
+input double InpSLATRMult          = 1.0;
+input double InpTP1RR              = 1.0;
+input double InpTP2RR              = 2.4;
+input double InpTP1ClosePercent    = 30.0;
 input bool   InpUseBreakeven       = true;
 input int    InpBreakevenOffsetPts = 0;
+input bool   InpUseTrailingAfterTP1 = true;
+input double InpTrailATRMult        = 1.0;
 input int    InpMASlopeLookback    = 3;
 input double InpATRMinDistMult     = 0.1;
 input double InpATRMaxDistMult     = 2.0;
@@ -409,6 +411,41 @@ void UpdateTP1Tracking()
    }
 }
 
+void ManageTrailingAfterTP1()
+{
+   if(!InpUseTrailingAfterTP1 || !tp1Done)
+      return;
+   if(!PositionSelect(_Symbol))
+      return;
+   if(PositionGetInteger(POSITION_MAGIC) != InpMagicNumber)
+      return;
+   bool atrOk = true;
+   double atr = GetIndicatorValue(handleAtrM15, 1, atrOk);
+   if(!atrOk || atr <= 0.0)
+      return;
+   long type = PositionGetInteger(POSITION_TYPE);
+   double currentSl = PositionGetDouble(POSITION_SL);
+   double newSl = currentSl;
+   if(type == POSITION_TYPE_BUY)
+   {
+      double candidate = SymbolInfoDouble(_Symbol, SYMBOL_BID) - atr * InpTrailATRMult;
+      if(candidate > newSl)
+         newSl = candidate;
+   }
+   else
+   {
+      double candidate = SymbolInfoDouble(_Symbol, SYMBOL_ASK) + atr * InpTrailATRMult;
+      if(newSl == 0.0 || candidate < newSl)
+         newSl = candidate;
+   }
+   if(newSl != currentSl && ValidateStops(PositionGetDouble(POSITION_PRICE_OPEN), newSl, PositionGetDouble(POSITION_TP)))
+   {
+      trade.PositionModify(_Symbol, newSl, PositionGetDouble(POSITION_TP));
+      if((int)trade.ResultRetcode() != TRADE_RETCODE_DONE)
+         PrintFormat("Trail modify failed retcode=%d lastError=%d", trade.ResultRetcode(), GetLastError());
+   }
+}
+
 int OnInit()
 {
    trade.SetExpertMagicNumber(InpMagicNumber);
@@ -440,9 +477,10 @@ void OnDeinit(const int reason)
 
 void OnTick()
 {
-   UpdateTP1Tracking();
    if(!IsNewBarM15())
       return;
+   UpdateTP1Tracking();
+   ManageTrailingAfterTP1();
 
    datetime barTime = iTime(_Symbol, PERIOD_M15, 1);
    SkipReason skip = SKIP_NONE;
