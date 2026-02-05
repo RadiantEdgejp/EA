@@ -34,6 +34,10 @@ input int    InpMASlopeLookback    = 3;
 input double InpATRMinDistMult     = 0.2;
 input double InpATRMaxDistMult     = 1.2;
 input int    InpMomentumLookback   = 5;
+input bool   InpUseAlignmentFilter = true;
+input bool   InpUseSlopeFilter     = true;
+input bool   InpUseDistanceFilter  = true;
+input bool   InpUseMomentumFilter  = false;
 
 enum ModeState
 {
@@ -472,13 +476,13 @@ void OnTick()
       entryFlags = signal ? "Pullback" : "";
       if(!signal)
          skip = SKIP_NO_SIGNAL;
-      if(skip == SKIP_NONE && signal && !AlignmentOK(isLong, ema21, ema50))
+      if(skip == SKIP_NONE && signal && InpUseAlignmentFilter && !AlignmentOK(isLong, ema21, ema50))
          skip = SKIP_ALIGN;
-      if(skip == SKIP_NONE && signal && !MASlopeOK(isLong, ema50, ema50Past))
+      if(skip == SKIP_NONE && signal && InpUseSlopeFilter && !MASlopeOK(isLong, ema50, ema50Past))
          skip = SKIP_SLOPE;
-      if(skip == SKIP_NONE && signal && !DistanceOK(isLong ? ask : bid, ema50, atr))
+      if(skip == SKIP_NONE && signal && InpUseDistanceFilter && !DistanceOK(isLong ? ask : bid, ema50, atr))
          skip = SKIP_DISTANCE;
-      if(skip == SKIP_NONE && signal && !MomentumOK(isLong))
+      if(skip == SKIP_NONE && signal && InpUseMomentumFilter && !MomentumOK(isLong))
          skip = SKIP_MOMENTUM;
       if(skip == SKIP_NONE && signal && !SameZoneOK(isLong ? ask : bid))
          skip = SKIP_SAMEZONE;
