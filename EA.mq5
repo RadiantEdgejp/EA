@@ -3,7 +3,7 @@
 //|                                        Auto FX Trading Tool     |
 //+------------------------------------------------------------------+
 #property copyright ""
-#property version   "1.10"
+#property version   "1.11"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -12,16 +12,16 @@ input double InpLots               = 0.1;
 input int    InpMagicNumber        = 221122;
 input bool   InpDebug              = true;
 input int    InpERLen              = 28;
-input double InpERTrendEnter       = 0.35;
-input double InpERTrendHold        = 0.25;
-input double InpERRangeExit        = 0.18;
+input double InpERTrendEnter       = 0.30;
+input double InpERTrendHold        = 0.20;
+input double InpERRangeExit        = 0.15;
 input int    InpMaxSpreadPoints    = 30;
 input int    InpSessionStartHour   = 7;
 input int    InpSessionStartMinute = 0;
 input int    InpSessionEndHour     = 23;
 input int    InpSessionEndMinute   = 0;
-input int    InpCooldownBars       = 3;
-input int    InpSameZonePoints     = 80;
+input int    InpCooldownBars       = 1;
+input int    InpSameZonePoints     = 40;
 input int    InpEMA200Period       = 200;
 input int    InpEMA21Period        = 21;
 input int    InpEMA50Period        = 50;
@@ -31,11 +31,11 @@ input double InpTP1RR              = 1.0;
 input double InpTP2RR              = 1.8;
 input double InpTP1ClosePercent    = 50.0;
 input int    InpMASlopeLookback    = 3;
-input double InpATRMinDistMult     = 0.2;
-input double InpATRMaxDistMult     = 1.2;
+input double InpATRMinDistMult     = 0.1;
+input double InpATRMaxDistMult     = 2.0;
 input int    InpMomentumLookback   = 5;
-input bool   InpUseAlignmentFilter = true;
-input bool   InpUseSlopeFilter     = true;
+input bool   InpUseAlignmentFilter = false;
+input bool   InpUseSlopeFilter     = false;
 input bool   InpUseDistanceFilter  = true;
 input bool   InpUseMomentumFilter  = false;
 
