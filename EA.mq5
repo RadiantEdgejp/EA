@@ -3,7 +3,7 @@
 //|                                        Auto FX Trading Tool     |
 //+------------------------------------------------------------------+
 #property copyright ""
-#property version   "1.15"
+#property version   "1.16"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -488,10 +488,10 @@ void OnDeinit(const int reason)
 
 void OnTick()
 {
-   if(!IsNewBarM15())
-      return;
    UpdateTP1Tracking();
    ManageTrailingAfterTP1();
+   if(!IsNewBarM15())
+      return;
    barsProcessed++;
    LogSkipSummaryIfNeeded();
 
