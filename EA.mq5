@@ -433,6 +433,6 @@ void OnTradeTransaction(const MqlTradeTransaction &trans, const MqlTradeRequest 
       long dealEntry = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
       string dealSymbol = HistoryDealGetString(dealTicket, DEAL_SYMBOL);
       if(dealEntry == DEAL_ENTRY_OUT && dealSymbol == _Symbol)
-         lastExitTime = trans.time;
+         lastExitTime = TimeCurrent();
    }
 }
