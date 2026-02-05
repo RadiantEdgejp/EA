@@ -3,7 +3,7 @@
 //|                                        Auto FX Trading Tool     |
 //+------------------------------------------------------------------+
 #property copyright ""
-#property version   "1.12"
+#property version   "1.13"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -30,6 +30,8 @@ input double InpSLATRMult          = 1.1;
 input double InpTP1RR              = 0.9;
 input double InpTP2RR              = 2.2;
 input double InpTP1ClosePercent    = 40.0;
+input bool   InpUseBreakeven       = true;
+input int    InpBreakevenOffsetPts = 0;
 input int    InpMASlopeLookback    = 3;
 input double InpATRMinDistMult     = 0.1;
 input double InpATRMaxDistMult     = 2.0;
@@ -387,6 +389,20 @@ void UpdateTP1Tracking()
             trade.PositionClosePartial(_Symbol, closeVol);
             if((int)trade.ResultRetcode() != TRADE_RETCODE_DONE)
                PrintFormat("TP1 close failed retcode=%d lastError=%d", trade.ResultRetcode(), GetLastError());
+         }
+         if(InpUseBreakeven)
+         {
+            double entry = PositionGetDouble(POSITION_PRICE_OPEN);
+            double sl = PositionGetDouble(POSITION_SL);
+            double offset = InpBreakevenOffsetPts * _Point;
+            double newSl = (type == POSITION_TYPE_BUY) ? (entry + offset) : (entry - offset);
+            bool improve = (type == POSITION_TYPE_BUY) ? (newSl > sl) : (newSl < sl);
+            if(improve)
+            {
+               trade.PositionModify(_Symbol, newSl, PositionGetDouble(POSITION_TP));
+               if((int)trade.ResultRetcode() != TRADE_RETCODE_DONE)
+                  PrintFormat("Breakeven modify failed retcode=%d lastError=%d", trade.ResultRetcode(), GetLastError());
+            }
          }
          tp1Done = true;
       }
