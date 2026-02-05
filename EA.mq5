@@ -425,9 +425,14 @@ void OnTradeTransaction(const MqlTradeTransaction &trans, const MqlTradeRequest 
 {
    if(trans.type == TRADE_TRANSACTION_DEAL_ADD)
    {
-      if(trans.deal_entry == DEAL_ENTRY_OUT && trans.symbol == _Symbol)
-      {
+      ulong dealTicket = trans.deal;
+      if(dealTicket == 0)
+         return;
+      datetime endTime = TimeCurrent();
+      HistorySelect(endTime - 86400, endTime);
+      long dealEntry = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
+      string dealSymbol = HistoryDealGetString(dealTicket, DEAL_SYMBOL);
+      if(dealEntry == DEAL_ENTRY_OUT && dealSymbol == _Symbol)
          lastExitTime = trans.time;
-      }
    }
 }
