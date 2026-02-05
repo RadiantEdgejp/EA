@@ -3,7 +3,7 @@
 //|                                        Auto FX Trading Tool     |
 //+------------------------------------------------------------------+
 #property copyright ""
-#property version   "1.14"
+#property version   "1.15"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -34,6 +34,7 @@ input bool   InpUseBreakeven       = true;
 input int    InpBreakevenOffsetPts = 0;
 input bool   InpUseTrailingAfterTP1 = true;
 input double InpTrailATRMult        = 1.0;
+input int    InpSummaryEveryBars    = 200;
 input int    InpMASlopeLookback    = 3;
 input double InpATRMinDistMult     = 0.1;
 input double InpATRMaxDistMult     = 2.0;
@@ -92,6 +93,7 @@ bool tp1Done = false;
 double tp1Price = 0.0;
 double tp2Price = 0.0;
 ModeState currentMode = MODE_RANGE;
+long barsProcessed = 0;
 
 long skipCounts[18];
 
@@ -292,6 +294,15 @@ void LogSkipSummary()
                skipCounts[SKIP_STOPLEVEL]);
 }
 
+void LogSkipSummaryIfNeeded()
+{
+   if(!InpDebug || InpSummaryEveryBars <= 0)
+      return;
+   if(barsProcessed % InpSummaryEveryBars != 0)
+      return;
+   LogSkipSummary();
+}
+
 string SkipReasonText(SkipReason reason)
 {
    switch(reason)
@@ -481,6 +492,8 @@ void OnTick()
       return;
    UpdateTP1Tracking();
    ManageTrailingAfterTP1();
+   barsProcessed++;
+   LogSkipSummaryIfNeeded();
 
    datetime barTime = iTime(_Symbol, PERIOD_M15, 1);
    SkipReason skip = SKIP_NONE;
@@ -609,4 +622,24 @@ void OnTick()
                   entryFlags,
                   SkipReasonText(skip));
    }
+}
+
+void OnTradeTransaction(const MqlTradeTransaction &trans, const MqlTradeRequest &request, const MqlTradeResult &result)
+{
+   if(!InpDebug)
+      return;
+   if(trans.type != TRADE_TRANSACTION_DEAL_ADD)
+      return;
+   ulong dealTicket = trans.deal;
+   if(dealTicket == 0)
+      return;
+   datetime endTime = TimeCurrent();
+   if(!HistorySelect(endTime - 86400, endTime))
+      return;
+   long entryType = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
+   string symbol = HistoryDealGetString(dealTicket, DEAL_SYMBOL);
+   if(symbol != _Symbol)
+      return;
+   double profit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
+   PrintFormat("Deal: entry=%d profit=%.2f", (int)entryType, profit);
 }
