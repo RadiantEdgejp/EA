@@ -3,7 +3,7 @@
 //|                                        Auto FX Trading Tool     |
 //+------------------------------------------------------------------+
 #property copyright ""
-#property version   "1.16"
+#property version   "1.17"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -26,10 +26,10 @@ input int    InpEMA200Period       = 200;
 input int    InpEMA21Period        = 21;
 input int    InpEMA50Period        = 50;
 input int    InpATRPeriod          = 14;
-input double InpSLATRMult          = 1.0;
-input double InpTP1RR              = 1.0;
-input double InpTP2RR              = 2.4;
-input double InpTP1ClosePercent    = 30.0;
+input double InpSLATRMult          = 0.9;
+input double InpTP1RR              = 1.2;
+input double InpTP2RR              = 2.8;
+input double InpTP1ClosePercent    = 25.0;
 input bool   InpUseBreakeven       = true;
 input int    InpBreakevenOffsetPts = 0;
 input bool   InpUseTrailingAfterTP1 = true;
