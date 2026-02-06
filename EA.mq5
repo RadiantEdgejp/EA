@@ -3,7 +3,7 @@
 //|                                        Auto FX Trading Tool     |
 //+------------------------------------------------------------------+
 #property copyright ""
-#property version   "1.22"
+#property version   "1.23"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -30,6 +30,13 @@ input double InpSLATRMult          = 0.9;
 input double InpTP1RR              = 1.2;
 input double InpTP2RR              = 2.8;
 input double InpTP1ClosePercent    = 25.0;
+input bool   InpUseModeRR          = true;
+input double InpTP1RRTrend         = 1.0;
+input double InpTP2RRTrend         = 1.8;
+input double InpTP1RRRange         = 0.8;
+input double InpTP2RRRange         = 1.2;
+input double InpTP1ClosePercentTrend = 50.0;
+input double InpTP1ClosePercentRange = 50.0;
 input bool   InpExitTPOnly         = false;
 input bool   InpUseBreakeven       = true;
 input int    InpBreakevenOffsetPts = 0;
@@ -93,6 +100,7 @@ double lastEntryPrice = 0.0;
 bool tp1Done = false;
 double tp1Price = 0.0;
 double tp2Price = 0.0;
+double tp1ClosePercentCurrent = 25.0;
 ModeState currentMode = MODE_RANGE;
 long barsProcessed = 0;
 
@@ -384,6 +392,7 @@ void UpdateTP1Tracking()
       tp1Done = false;
       tp1Price = 0.0;
       tp2Price = 0.0;
+      tp1ClosePercentCurrent = InpTP1ClosePercent;
       return;
    }
    if(tp1Done)
@@ -398,7 +407,7 @@ void UpdateTP1Tracking()
       if(hit)
       {
          double volume = PositionGetDouble(POSITION_VOLUME);
-         double closeVol = volume * (InpTP1ClosePercent / 100.0);
+         double closeVol = volume * (tp1ClosePercentCurrent / 100.0);
          closeVol = NormalizeLots(closeVol);
          if(closeVol > 0.0)
          {
@@ -570,8 +579,26 @@ void OnTick()
       double entryPrice = isLong ? ask : bid;
       double sl = isLong ? (entryPrice - atr * InpSLATRMult) : (entryPrice + atr * InpSLATRMult);
       double risk = MathAbs(entryPrice - sl);
-      double tp1 = isLong ? (entryPrice + risk * InpTP1RR) : (entryPrice - risk * InpTP1RR);
-      double tp2 = isLong ? (entryPrice + risk * InpTP2RR) : (entryPrice - risk * InpTP2RR);
+      double tp1RR = InpTP1RR;
+      double tp2RR = InpTP2RR;
+      double tp1ClosePercent = InpTP1ClosePercent;
+      if(InpUseModeRR)
+      {
+         if(currentMode == MODE_TREND)
+         {
+            tp1RR = InpTP1RRTrend;
+            tp2RR = InpTP2RRTrend;
+            tp1ClosePercent = InpTP1ClosePercentTrend;
+         }
+         else
+         {
+            tp1RR = InpTP1RRRange;
+            tp2RR = InpTP2RRRange;
+            tp1ClosePercent = InpTP1ClosePercentRange;
+         }
+      }
+      double tp1 = isLong ? (entryPrice + risk * tp1RR) : (entryPrice - risk * tp1RR);
+      double tp2 = isLong ? (entryPrice + risk * tp2RR) : (entryPrice - risk * tp2RR);
 
       if(!ValidateStops(entryPrice, sl, tp2))
       {
@@ -608,6 +635,7 @@ void OnTick()
                tp1Price = tp1;
                tp2Price = tp2;
                tp1Done = false;
+               tp1ClosePercentCurrent = tp1ClosePercent;
             }
          }
       }
