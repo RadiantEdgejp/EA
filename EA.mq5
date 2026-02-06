@@ -3,7 +3,7 @@
 //|                                        Auto FX Trading Tool     |
 //+------------------------------------------------------------------+
 #property copyright ""
-#property version   "1.26"
+#property version   "1.27"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -32,6 +32,7 @@ input int    InpFixedPipSet        = 0; // 0=A 1=B 2=C
 input double InpMaxSpreadPips      = 1.5;
 input double InpATRMinSLMult       = 0.6;
 input double InpATRMaxSLMult       = 1.2;
+input double InpTP1FixedPercent   = 50.0;
 input double InpTP1RR              = 1.2;
 input double InpTP2RR              = 2.8;
 input double InpTP1ClosePercent    = 25.0;
@@ -440,6 +441,8 @@ void UpdateTP1Tracking()
    }
    if(tp1Done)
       return;
+   if(tp1ClosePercentCurrent <= 0.0)
+      return;
    if(PositionSelect(_Symbol))
    {
       if(PositionGetInteger(POSITION_MAGIC) != InpMagicNumber)
@@ -537,6 +540,9 @@ int OnInit()
                      InpFixedPipSet, slPips, tpPips,
                      slPips * InpATRMinSLMult, slPips * InpATRMaxSLMult,
                      InpMaxSpreadPips);
+         PrintFormat("Fixed TP1 percent=%.1f TP1Close%%=%.1f",
+                     MathMax(0.0, MathMin(InpTP1FixedPercent, 100.0)),
+                     InpUseTP1 ? InpTP1ClosePercent : 0.0);
       }
       else
       {
@@ -691,7 +697,7 @@ void OnTick()
       double tp1RR = InpTP1RR;
       double tp2RR = InpTP2RR;
       double tp1ClosePercent = InpTP1ClosePercent;
-      if(InpUseModeRR)
+      if(!InpUseFixedPips && InpUseModeRR)
       {
          if(currentMode == MODE_TREND)
          {
@@ -708,9 +714,21 @@ void OnTick()
       }
       if(!InpUseTP1)
          tp1ClosePercent = 0.0;
-      double tp1 = isLong ? (entryPrice + risk * tp1RR) : (entryPrice - risk * tp1RR);
-      if(!InpUseFixedPips)
+      double tp1 = 0.0;
+      if(InpUseFixedPips)
+      {
+         double tp1Pct = MathMax(0.0, MathMin(InpTP1FixedPercent, 100.0));
+         if(tp1ClosePercent <= 0.0)
+            tp1Pct = 0.0;
+         double tp1Points = PipsToPoints(fixedTpPips) * (tp1Pct / 100.0);
+         if(tp1Points > 0.0)
+            tp1 = isLong ? (entryPrice + tp1Points * _Point) : (entryPrice - tp1Points * _Point);
+      }
+      else
+      {
+         tp1 = isLong ? (entryPrice + risk * tp1RR) : (entryPrice - risk * tp1RR);
          tp2 = isLong ? (entryPrice + risk * tp2RR) : (entryPrice - risk * tp2RR);
+      }
 
       if(!ValidateStops(entryPrice, sl, tp2))
       {
