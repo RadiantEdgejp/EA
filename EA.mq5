@@ -3,7 +3,7 @@
 //|                                        Auto FX Trading Tool     |
 //+------------------------------------------------------------------+
 #property copyright ""
-#property version   "1.20"
+#property version   "1.21"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -30,7 +30,7 @@ input double InpSLATRMult          = 0.9;
 input double InpTP1RR              = 1.2;
 input double InpTP2RR              = 2.8;
 input double InpTP1ClosePercent    = 25.0;
-input bool   InpExitTPOnly         = false;
+input bool   InpExitTPOnly         = true;
 input bool   InpUseBreakeven       = true;
 input int    InpBreakevenOffsetPts = 0;
 input bool   InpUseTrailingAfterTP1 = true;
@@ -474,6 +474,7 @@ int OnInit()
       Print("Invalid indicator handle.");
       return INIT_FAILED;
    }
+   PrintFormat("Exit mode: TP/SL only=%s", InpExitTPOnly ? "ON" : "OFF");
    ArrayInitialize(skipCounts, 0);
    return INIT_SUCCEEDED;
 }
