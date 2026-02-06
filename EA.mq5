@@ -3,7 +3,7 @@
 //|                                        Auto FX Trading Tool     |
 //+------------------------------------------------------------------+
 #property copyright ""
-#property version   "1.30"
+#property version   "1.31"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -602,8 +602,11 @@ void OnDeinit(const int reason)
 
 void OnTick()
 {
-   UpdateTP1Tracking();
-   ManageTrailingAfterTP1();
+   if(!InpExitTPOnly)
+   {
+      UpdateTP1Tracking();
+      ManageTrailingAfterTP1();
+   }
    if(!IsNewBarM15())
       return;
    barsProcessed++;
@@ -700,12 +703,17 @@ void OnTick()
       double sl = 0.0;
       double tp2 = 0.0;
       double risk = 0.0;
+      double entryCheckSl = 0.0;
+      double entryCheckTp = 0.0;
+      double pipValue = (_Digits == 3 || _Digits == 5) ? 10.0 * _Point : _Point;
       if(InpUseFixedPips)
       {
-         double slPoints = PipsToPoints(fixedSlPips);
-         double tpPoints = PipsToPoints(fixedTpPips);
-         sl = isLong ? (entryPrice - slPoints * _Point) : (entryPrice + slPoints * _Point);
-         tp2 = isLong ? (entryPrice + tpPoints * _Point) : (entryPrice - tpPoints * _Point);
+         double slDistance = fixedSlPips * pipValue;
+         double tpDistance = fixedTpPips * pipValue;
+         entryCheckSl = isLong ? (entryPrice - slDistance) : (entryPrice + slDistance);
+         entryCheckTp = isLong ? (entryPrice + tpDistance) : (entryPrice - tpDistance);
+         sl = entryCheckSl;
+         tp2 = entryCheckTp;
          risk = MathAbs(entryPrice - sl);
       }
       else
@@ -749,7 +757,11 @@ void OnTick()
          tp2 = isLong ? (entryPrice + risk * tp2RR) : (entryPrice - risk * tp2RR);
       }
 
-      if(!ValidateStops(entryPrice, sl, tp2))
+      if(InpUseFixedPips && !ValidateStops(entryPrice, entryCheckSl, entryCheckTp))
+      {
+         skip = SKIP_STOPLEVEL;
+      }
+      else if(!ValidateStops(entryPrice, sl, tp2))
       {
          skip = SKIP_STOPLEVEL;
       }
@@ -768,10 +780,20 @@ void OnTick()
          {
             trade.SetExpertMagicNumber(InpMagicNumber);
             bool result = false;
-            if(isLong)
-               result = trade.Buy(lot, _Symbol, entryPrice, sl, tp2, "EA");
+            if(InpUseFixedPips)
+            {
+               if(isLong)
+                  result = trade.Buy(lot, _Symbol, 0.0, 0.0, 0.0, "EA");
+               else
+                  result = trade.Sell(lot, _Symbol, 0.0, 0.0, 0.0, "EA");
+            }
             else
-               result = trade.Sell(lot, _Symbol, entryPrice, sl, tp2, "EA");
+            {
+               if(isLong)
+                  result = trade.Buy(lot, _Symbol, entryPrice, sl, tp2, "EA");
+               else
+                  result = trade.Sell(lot, _Symbol, entryPrice, sl, tp2, "EA");
+            }
             if(!result || (int)trade.ResultRetcode() != TRADE_RETCODE_DONE)
             {
                PrintFormat("Order failed retcode=%d lastError=%d", trade.ResultRetcode(), GetLastError());
@@ -779,12 +801,79 @@ void OnTick()
             }
             else
             {
-               lastEntryPrice = entryPrice;
-               lastEntryBarTime = barTime;
-               tp1Price = tp1;
-               tp2Price = tp2;
-               tp1Done = false;
-               tp1ClosePercentCurrent = tp1ClosePercent;
+               if(!InpUseFixedPips)
+               {
+                  lastEntryPrice = entryPrice;
+                  lastEntryBarTime = barTime;
+                  tp1Price = tp1;
+                  tp2Price = tp2;
+                  tp1Done = false;
+                  tp1ClosePercentCurrent = tp1ClosePercent;
+               }
+               else
+               {
+                  double fillPrice = trade.ResultPrice();
+                  if(fillPrice <= 0.0 && PositionSelect(_Symbol))
+                     fillPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+                  if(fillPrice <= 0.0)
+                  {
+                     Print("Fill price unavailable, closing position for safety.");
+                     trade.PositionClose(_Symbol);
+                     skip = SKIP_ORDER_FAIL;
+                  }
+                  else
+                  {
+                     double slDistance = fixedSlPips * pipValue;
+                     double tpDistance = fixedTpPips * pipValue;
+                     double modifySl = isLong ? (fillPrice - slDistance) : (fillPrice + slDistance);
+                     double modifyTp = isLong ? (fillPrice + tpDistance) : (fillPrice - tpDistance);
+                     modifySl = NormalizeDouble(modifySl, _Digits);
+                     modifyTp = NormalizeDouble(modifyTp, _Digits);
+                     if(!ValidateStops(fillPrice, modifySl, modifyTp))
+                     {
+                        Print("Modify stops invalid after fill, closing position.");
+                        trade.PositionClose(_Symbol);
+                        skip = SKIP_STOPLEVEL;
+                     }
+                     else
+                     {
+                        trade.PositionModify(_Symbol, modifySl, modifyTp);
+                        if((int)trade.ResultRetcode() != TRADE_RETCODE_DONE)
+                        {
+                           PrintFormat("Modify failed retcode=%d lastError=%d; closing position.", trade.ResultRetcode(), GetLastError());
+                           trade.PositionClose(_Symbol);
+                           skip = SKIP_ORDER_FAIL;
+                        }
+                        else
+                        {
+                           double actualSLPips = MathAbs(fillPrice - modifySl) / pipValue;
+                           double actualTPPips = MathAbs(fillPrice - modifyTp) / pipValue;
+                           double atrPips = PointsToPips(atr / _Point);
+                           string modeText = currentMode == MODE_TREND ? "Trend" : "Range";
+                           string setText = currentMode == MODE_TREND
+                              ? (InpFixedPipSetTrend == 0 ? "A" : (InpFixedPipSetTrend == 1 ? "B" : "C"))
+                              : "Range";
+                           PrintFormat("ENTRY %s %s %s fill=%.5f sl=%.1f tp=%.1f actualSLpips=%.1f actualTPpips=%.1f spread=%.2f atr=%.2f",
+                                       modeText,
+                                       setText,
+                                       isLong ? "BUY" : "SELL",
+                                       fillPrice,
+                                       fixedSlPips,
+                                       fixedTpPips,
+                                       actualSLPips,
+                                       actualTPPips,
+                                       spreadPips,
+                                       atrPips);
+                           lastEntryPrice = fillPrice;
+                           lastEntryBarTime = barTime;
+                           tp1Price = tp1;
+                           tp2Price = modifyTp;
+                           tp1Done = false;
+                           tp1ClosePercentCurrent = tp1ClosePercent;
+                        }
+                     }
+                  }
+               }
             }
          }
       }
