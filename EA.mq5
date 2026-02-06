@@ -3,7 +3,7 @@
 //|                                        Auto FX Trading Tool     |
 //+------------------------------------------------------------------+
 #property copyright ""
-#property version   "1.23"
+#property version   "1.24"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -30,6 +30,7 @@ input double InpSLATRMult          = 0.9;
 input double InpTP1RR              = 1.2;
 input double InpTP2RR              = 2.8;
 input double InpTP1ClosePercent    = 25.0;
+input bool   InpUseTP1             = true;
 input bool   InpUseModeRR          = true;
 input double InpTP1RRTrend         = 1.0;
 input double InpTP2RRTrend         = 1.8;
@@ -150,6 +151,13 @@ double NormalizeLots(double lots)
    if(normalized < minLot)
       return 0.0;
    return normalized;
+}
+
+double EffectiveRR(double tp1RR, double tp2RR, double tp1ClosePercent)
+{
+   double w1 = MathMax(0.0, MathMin(tp1ClosePercent, 100.0)) / 100.0;
+   double w2 = 1.0 - w1;
+   return tp1RR * w1 + tp2RR * w2;
 }
 
 bool HasOpenPosition()
@@ -484,6 +492,21 @@ int OnInit()
       return INIT_FAILED;
    }
    PrintFormat("Exit mode: TP/SL only=%s", InpExitTPOnly ? "ON" : "OFF");
+   if(InpUseModeRR)
+   {
+      PrintFormat("RR Trend: TP1RR=%.2f TP2RR=%.2f TP1%%=%.1f EffRR=%.2f",
+                  InpTP1RRTrend, InpTP2RRTrend, InpTP1ClosePercentTrend,
+                  EffectiveRR(InpTP1RRTrend, InpTP2RRTrend, InpTP1ClosePercentTrend));
+      PrintFormat("RR Range: TP1RR=%.2f TP2RR=%.2f TP1%%=%.1f EffRR=%.2f",
+                  InpTP1RRRange, InpTP2RRRange, InpTP1ClosePercentRange,
+                  EffectiveRR(InpTP1RRRange, InpTP2RRRange, InpTP1ClosePercentRange));
+   }
+   else
+   {
+      PrintFormat("RR: TP1RR=%.2f TP2RR=%.2f TP1%%=%.1f EffRR=%.2f",
+                  InpTP1RR, InpTP2RR, InpTP1ClosePercent,
+                  EffectiveRR(InpTP1RR, InpTP2RR, InpTP1ClosePercent));
+   }
    ArrayInitialize(skipCounts, 0);
    return INIT_SUCCEEDED;
 }
@@ -597,6 +620,8 @@ void OnTick()
             tp1ClosePercent = InpTP1ClosePercentRange;
          }
       }
+      if(!InpUseTP1)
+         tp1ClosePercent = 0.0;
       double tp1 = isLong ? (entryPrice + risk * tp1RR) : (entryPrice - risk * tp1RR);
       double tp2 = isLong ? (entryPrice + risk * tp2RR) : (entryPrice - risk * tp2RR);
 
