@@ -3,7 +3,7 @@
 //|                                        Auto FX Trading Tool     |
 //+------------------------------------------------------------------+
 #property copyright ""
-#property version   "1.17"
+#property version   "1.18"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -16,16 +16,20 @@ input double InpERTrendEnter       = 0.30;
 input double InpERTrendHold        = 0.20;
 input double InpERRangeExit        = 0.15;
 input int    InpMaxSpreadPoints    = 30;
+input double InpMaxSpreadPips      = 1.5;
 input int    InpSessionStartHour   = 7;
 input int    InpSessionStartMinute = 0;
 input int    InpSessionEndHour     = 23;
 input int    InpSessionEndMinute   = 0;
 input int    InpCooldownBars       = 1;
 input int    InpSameZonePoints     = 40;
+input double InpATRMinSLMult       = 0.6;
+input double InpATRMaxSLMult       = 1.2;
 input int    InpEMA200Period       = 200;
 input int    InpEMA21Period        = 21;
 input int    InpEMA50Period        = 50;
 input int    InpATRPeriod          = 14;
+input int    InpRiskSet            = 0;   // 0=A (SL16/TP28), 1=B (SL20/TP32), 2=C (SL12/TP24)
 input double InpSLATRMult          = 0.9;
 input double InpTP1RR              = 1.2;
 input double InpTP2RR              = 2.8;
@@ -69,6 +73,7 @@ enum SkipReason
    SKIP_ALIGN,
    SKIP_SLOPE,
    SKIP_DISTANCE,
+   SKIP_ATR_RANGE,
    SKIP_MOMENTUM,
    SKIP_INVALID_HANDLE,
    SKIP_NO_SIGNAL,
@@ -95,12 +100,40 @@ double tp2Price = 0.0;
 ModeState currentMode = MODE_RANGE;
 long barsProcessed = 0;
 
-long skipCounts[18];
+long skipCounts[19];
 
 double PipsToPoints(double pips)
 {
    double pip = (_Digits == 3 || _Digits == 5) ? 10.0 : 1.0;
    return pips * pip;
+}
+
+double PipSize()
+{
+   return (_Digits == 3 || _Digits == 5) ? (_Point * 10.0) : _Point;
+}
+
+double PipsToPrice(double pips)
+{
+   return pips * PipSize();
+}
+
+void GetRiskSetPips(double &slPips, double &tpPips)
+{
+   if(InpRiskSet == 1)
+   {
+      slPips = 20.0;
+      tpPips = 32.0;
+      return;
+   }
+   if(InpRiskSet == 2)
+   {
+      slPips = 12.0;
+      tpPips = 24.0;
+      return;
+   }
+   slPips = 16.0;
+   tpPips = 28.0;
 }
 
 bool IsNewBarM15()
@@ -274,7 +307,7 @@ void LogSkipSummary()
 {
    if(!InpDebug)
       return;
-   PrintFormat("Skip summary: spread=%ld time=%ld cooldown=%ld samezone=%ld range=%ld trend_off=%ld align=%ld slope=%ld distance=%ld momentum=%ld invalid_handle=%ld no_signal=%ld trade_disabled=%ld position_exists=%ld order_fail=%ld lot_invalid=%ld stop_level=%ld",
+   PrintFormat("Skip summary: spread=%ld time=%ld cooldown=%ld samezone=%ld range=%ld trend_off=%ld align=%ld slope=%ld distance=%ld atr_range=%ld momentum=%ld invalid_handle=%ld no_signal=%ld trade_disabled=%ld position_exists=%ld order_fail=%ld lot_invalid=%ld stop_level=%ld",
                skipCounts[SKIP_SPREAD],
                skipCounts[SKIP_TIME],
                skipCounts[SKIP_COOLDOWN],
@@ -284,6 +317,7 @@ void LogSkipSummary()
                skipCounts[SKIP_ALIGN],
                skipCounts[SKIP_SLOPE],
                skipCounts[SKIP_DISTANCE],
+               skipCounts[SKIP_ATR_RANGE],
                skipCounts[SKIP_MOMENTUM],
                skipCounts[SKIP_INVALID_HANDLE],
                skipCounts[SKIP_NO_SIGNAL],
@@ -316,6 +350,7 @@ string SkipReasonText(SkipReason reason)
       case SKIP_ALIGN: return "AlignFail";
       case SKIP_SLOPE: return "SlopeFail";
       case SKIP_DISTANCE: return "DistanceFail";
+      case SKIP_ATR_RANGE: return "ATRRange";
       case SKIP_MOMENTUM: return "MomentumFail";
       case SKIP_INVALID_HANDLE: return "InvalidHandle";
       case SKIP_NO_SIGNAL: return "NoSignal";
@@ -501,8 +536,9 @@ void OnTick()
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double spreadPoints = (ask - bid) / _Point;
+   double spreadPips = (ask - bid) / PipSize();
 
-   if(spreadPoints > InpMaxSpreadPoints)
+   if(spreadPoints > InpMaxSpreadPoints || spreadPips > InpMaxSpreadPips)
       skip = SKIP_SPREAD;
    else if(!SessionAllowed(TimeCurrent()))
       skip = SKIP_TIME;
@@ -534,6 +570,12 @@ void OnTick()
    double atr = GetIndicatorValue(handleAtrM15, 1, atrOk);
    if((!ema21Ok || !ema50Ok || !atrOk || !ema50PastOk) && skip == SKIP_NONE)
       skip = SKIP_INVALID_HANDLE;
+   double slPips = 0.0;
+   double tpPips = 0.0;
+   GetRiskSetPips(slPips, tpPips);
+   double atrPips = atr / PipSize();
+   if(skip == SKIP_NONE && (atrPips < slPips * InpATRMinSLMult || atrPips > slPips * InpATRMaxSLMult))
+      skip = SKIP_ATR_RANGE;
 
    bool signal = false;
    bool isLong = (trendDir == TREND_LONG);
@@ -562,10 +604,9 @@ void OnTick()
    if(skip == SKIP_NONE)
    {
       double entryPrice = isLong ? ask : bid;
-      double sl = isLong ? (entryPrice - atr * InpSLATRMult) : (entryPrice + atr * InpSLATRMult);
-      double risk = MathAbs(entryPrice - sl);
-      double tp1 = isLong ? (entryPrice + risk * InpTP1RR) : (entryPrice - risk * InpTP1RR);
-      double tp2 = isLong ? (entryPrice + risk * InpTP2RR) : (entryPrice - risk * InpTP2RR);
+      double sl = isLong ? (entryPrice - PipsToPrice(slPips)) : (entryPrice + PipsToPrice(slPips));
+      double tp1 = isLong ? (entryPrice + PipsToPrice(slPips * InpTP1RR)) : (entryPrice - PipsToPrice(slPips * InpTP1RR));
+      double tp2 = isLong ? (entryPrice + PipsToPrice(tpPips)) : (entryPrice - PipsToPrice(tpPips));
 
       if(!ValidateStops(entryPrice, sl, tp2))
       {
