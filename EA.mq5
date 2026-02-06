@@ -3,7 +3,7 @@
 //|                                        Auto FX Trading Tool     |
 //+------------------------------------------------------------------+
 #property copyright ""
-#property version   "1.24"
+#property version   "1.25"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -33,11 +33,11 @@ input double InpTP1ClosePercent    = 25.0;
 input bool   InpUseTP1             = true;
 input bool   InpUseModeRR          = true;
 input double InpTP1RRTrend         = 1.0;
-input double InpTP2RRTrend         = 1.8;
+input double InpTP2RRTrend         = 2.0;
 input double InpTP1RRRange         = 0.8;
-input double InpTP2RRRange         = 1.2;
-input double InpTP1ClosePercentTrend = 50.0;
-input double InpTP1ClosePercentRange = 50.0;
+input double InpTP2RRRange         = 1.4;
+input double InpTP1ClosePercentTrend = 35.0;
+input double InpTP1ClosePercentRange = 60.0;
 input bool   InpExitTPOnly         = false;
 input bool   InpUseBreakeven       = true;
 input int    InpBreakevenOffsetPts = 0;
