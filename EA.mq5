@@ -3,7 +3,7 @@
 //|                                        Auto FX Trading Tool     |
 //+------------------------------------------------------------------+
 #property copyright ""
-#property version   "1.21"
+#property version   "1.22"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -30,7 +30,7 @@ input double InpSLATRMult          = 0.9;
 input double InpTP1RR              = 1.2;
 input double InpTP2RR              = 2.8;
 input double InpTP1ClosePercent    = 25.0;
-input bool   InpExitTPOnly         = true;
+input bool   InpExitTPOnly         = false;
 input bool   InpUseBreakeven       = true;
 input int    InpBreakevenOffsetPts = 0;
 input bool   InpUseTrailingAfterTP1 = true;
