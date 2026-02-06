@@ -3,7 +3,7 @@
 //|                                        Auto FX Trading Tool     |
 //+------------------------------------------------------------------+
 #property copyright ""
-#property version   "1.25"
+#property version   "1.26"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -27,6 +27,11 @@ input int    InpEMA21Period        = 21;
 input int    InpEMA50Period        = 50;
 input int    InpATRPeriod          = 14;
 input double InpSLATRMult          = 0.9;
+input bool   InpUseFixedPips       = true;
+input int    InpFixedPipSet        = 0; // 0=A 1=B 2=C
+input double InpMaxSpreadPips      = 1.5;
+input double InpATRMinSLMult       = 0.6;
+input double InpATRMaxSLMult       = 1.2;
 input double InpTP1RR              = 1.2;
 input double InpTP2RR              = 2.8;
 input double InpTP1ClosePercent    = 25.0;
@@ -75,6 +80,7 @@ enum SkipReason
    SKIP_SAMEZONE,
    SKIP_RANGE,
    SKIP_TREND_OFF,
+   SKIP_ATR_RANGE,
    SKIP_ALIGN,
    SKIP_SLOPE,
    SKIP_DISTANCE,
@@ -105,12 +111,18 @@ double tp1ClosePercentCurrent = 25.0;
 ModeState currentMode = MODE_RANGE;
 long barsProcessed = 0;
 
-long skipCounts[18];
+long skipCounts[19];
 
 double PipsToPoints(double pips)
 {
    double pip = (_Digits == 3 || _Digits == 5) ? 10.0 : 1.0;
    return pips * pip;
+}
+
+double PointsToPips(double points)
+{
+   double pip = (_Digits == 3 || _Digits == 5) ? 10.0 : 1.0;
+   return points / pip;
 }
 
 bool IsNewBarM15()
@@ -266,6 +278,27 @@ bool SameZoneOK(double price)
    return (distancePoints >= InpSameZonePoints);
 }
 
+bool GetFixedPipSet(double &slPips, double &tpPips)
+{
+   switch(InpFixedPipSet)
+   {
+      case 0:
+         slPips = 16.0;
+         tpPips = 28.0;
+         return true;
+      case 1:
+         slPips = 20.0;
+         tpPips = 32.0;
+         return true;
+      case 2:
+         slPips = 12.0;
+         tpPips = 24.0;
+         return true;
+      default:
+         return false;
+   }
+}
+
 bool ValidateStops(double entryPrice, double sl, double tp)
 {
    int stops = (int)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
@@ -291,13 +324,14 @@ void LogSkipSummary()
 {
    if(!InpDebug)
       return;
-   PrintFormat("Skip summary: spread=%ld time=%ld cooldown=%ld samezone=%ld range=%ld trend_off=%ld align=%ld slope=%ld distance=%ld momentum=%ld invalid_handle=%ld no_signal=%ld trade_disabled=%ld position_exists=%ld order_fail=%ld lot_invalid=%ld stop_level=%ld",
+   PrintFormat("Skip summary: spread=%ld time=%ld cooldown=%ld samezone=%ld range=%ld trend_off=%ld atr_range=%ld align=%ld slope=%ld distance=%ld momentum=%ld invalid_handle=%ld no_signal=%ld trade_disabled=%ld position_exists=%ld order_fail=%ld lot_invalid=%ld stop_level=%ld",
                skipCounts[SKIP_SPREAD],
                skipCounts[SKIP_TIME],
                skipCounts[SKIP_COOLDOWN],
                skipCounts[SKIP_SAMEZONE],
                skipCounts[SKIP_RANGE],
                skipCounts[SKIP_TREND_OFF],
+               skipCounts[SKIP_ATR_RANGE],
                skipCounts[SKIP_ALIGN],
                skipCounts[SKIP_SLOPE],
                skipCounts[SKIP_DISTANCE],
@@ -330,6 +364,7 @@ string SkipReasonText(SkipReason reason)
       case SKIP_SAMEZONE: return "SameZone";
       case SKIP_RANGE: return "RangeBlock";
       case SKIP_TREND_OFF: return "TrendGateOff";
+      case SKIP_ATR_RANGE: return "ATRRange";
       case SKIP_ALIGN: return "AlignFail";
       case SKIP_SLOPE: return "SlopeFail";
       case SKIP_DISTANCE: return "DistanceFail";
@@ -492,6 +527,22 @@ int OnInit()
       return INIT_FAILED;
    }
    PrintFormat("Exit mode: TP/SL only=%s", InpExitTPOnly ? "ON" : "OFF");
+   if(InpUseFixedPips)
+   {
+      double slPips = 0.0;
+      double tpPips = 0.0;
+      if(GetFixedPipSet(slPips, tpPips))
+      {
+         PrintFormat("Fixed pips set=%d SL=%.1f TP=%.1f ATR range=%.2f-%.2f MaxSpread=%.2f pips",
+                     InpFixedPipSet, slPips, tpPips,
+                     slPips * InpATRMinSLMult, slPips * InpATRMaxSLMult,
+                     InpMaxSpreadPips);
+      }
+      else
+      {
+         PrintFormat("Fixed pips set=%d invalid", InpFixedPipSet);
+      }
+   }
    if(InpUseModeRR)
    {
       PrintFormat("RR Trend: TP1RR=%.2f TP2RR=%.2f TP1%%=%.1f EffRR=%.2f",
@@ -539,8 +590,11 @@ void OnTick()
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double spreadPoints = (ask - bid) / _Point;
+   double spreadPips = PointsToPips(spreadPoints);
 
    if(spreadPoints > InpMaxSpreadPoints)
+      skip = SKIP_SPREAD;
+   if(skip == SKIP_NONE && InpMaxSpreadPips > 0.0 && spreadPips > InpMaxSpreadPips)
       skip = SKIP_SPREAD;
    else if(!SessionAllowed(TimeCurrent()))
       skip = SKIP_TIME;
@@ -573,6 +627,24 @@ void OnTick()
    if((!ema21Ok || !ema50Ok || !atrOk || !ema50PastOk) && skip == SKIP_NONE)
       skip = SKIP_INVALID_HANDLE;
 
+   double fixedSlPips = 0.0;
+   double fixedTpPips = 0.0;
+   if(skip == SKIP_NONE && InpUseFixedPips)
+   {
+      if(!GetFixedPipSet(fixedSlPips, fixedTpPips))
+      {
+         skip = SKIP_NO_SIGNAL;
+      }
+      else
+      {
+         double atrPips = PointsToPips(atr / _Point);
+         double minAtr = fixedSlPips * InpATRMinSLMult;
+         double maxAtr = fixedSlPips * InpATRMaxSLMult;
+         if(atrPips < minAtr || atrPips > maxAtr)
+            skip = SKIP_ATR_RANGE;
+      }
+   }
+
    bool signal = false;
    bool isLong = (trendDir == TREND_LONG);
    if(skip == SKIP_NONE && !HasOpenPosition())
@@ -600,8 +672,22 @@ void OnTick()
    if(skip == SKIP_NONE)
    {
       double entryPrice = isLong ? ask : bid;
-      double sl = isLong ? (entryPrice - atr * InpSLATRMult) : (entryPrice + atr * InpSLATRMult);
-      double risk = MathAbs(entryPrice - sl);
+      double sl = 0.0;
+      double tp2 = 0.0;
+      double risk = 0.0;
+      if(InpUseFixedPips)
+      {
+         double slPoints = PipsToPoints(fixedSlPips);
+         double tpPoints = PipsToPoints(fixedTpPips);
+         sl = isLong ? (entryPrice - slPoints * _Point) : (entryPrice + slPoints * _Point);
+         tp2 = isLong ? (entryPrice + tpPoints * _Point) : (entryPrice - tpPoints * _Point);
+         risk = MathAbs(entryPrice - sl);
+      }
+      else
+      {
+         sl = isLong ? (entryPrice - atr * InpSLATRMult) : (entryPrice + atr * InpSLATRMult);
+         risk = MathAbs(entryPrice - sl);
+      }
       double tp1RR = InpTP1RR;
       double tp2RR = InpTP2RR;
       double tp1ClosePercent = InpTP1ClosePercent;
@@ -623,7 +709,8 @@ void OnTick()
       if(!InpUseTP1)
          tp1ClosePercent = 0.0;
       double tp1 = isLong ? (entryPrice + risk * tp1RR) : (entryPrice - risk * tp1RR);
-      double tp2 = isLong ? (entryPrice + risk * tp2RR) : (entryPrice - risk * tp2RR);
+      if(!InpUseFixedPips)
+         tp2 = isLong ? (entryPrice + risk * tp2RR) : (entryPrice - risk * tp2RR);
 
       if(!ValidateStops(entryPrice, sl, tp2))
       {
