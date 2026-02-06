@@ -3,7 +3,7 @@
 //|                                        Auto FX Trading Tool     |
 //+------------------------------------------------------------------+
 #property copyright ""
-#property version   "1.27"
+#property version   "1.30"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -28,10 +28,15 @@ input int    InpEMA50Period        = 50;
 input int    InpATRPeriod          = 14;
 input double InpSLATRMult          = 0.9;
 input bool   InpUseFixedPips       = true;
-input int    InpFixedPipSet        = 0; // 0=A 1=B 2=C
+input int    InpFixedPipSetTrend   = 0; // 0=A 1=B 2=C
+input double InpRangeSLPips        = 10.0;
+input double InpRangeTPPips        = 10.0;
+input bool   InpAllowRangeEntries  = true;
 input double InpMaxSpreadPips      = 1.5;
+input bool   InpUseSpreadPipsFilter = true;
 input double InpATRMinSLMult       = 0.6;
 input double InpATRMaxSLMult       = 1.2;
+input bool   InpUseATRRangeFilter  = true;
 input double InpTP1FixedPercent   = 50.0;
 input double InpTP1RR              = 1.2;
 input double InpTP2RR              = 2.8;
@@ -44,10 +49,10 @@ input double InpTP1RRRange         = 0.8;
 input double InpTP2RRRange         = 1.4;
 input double InpTP1ClosePercentTrend = 35.0;
 input double InpTP1ClosePercentRange = 60.0;
-input bool   InpExitTPOnly         = false;
-input bool   InpUseBreakeven       = true;
+input bool   InpExitTPOnly         = true;
+input bool   InpUseBreakeven       = false;
 input int    InpBreakevenOffsetPts = 0;
-input bool   InpUseTrailingAfterTP1 = true;
+input bool   InpUseTrailingAfterTP1 = false;
 input double InpTrailATRMult        = 1.0;
 input int    InpSummaryEveryBars    = 200;
 input int    InpMASlopeLookback    = 3;
@@ -279,9 +284,9 @@ bool SameZoneOK(double price)
    return (distancePoints >= InpSameZonePoints);
 }
 
-bool GetFixedPipSet(double &slPips, double &tpPips)
+bool GetFixedPipSet(int setId, double &slPips, double &tpPips)
 {
-   switch(InpFixedPipSet)
+   switch(setId)
    {
       case 0:
          slPips = 16.0;
@@ -298,6 +303,17 @@ bool GetFixedPipSet(double &slPips, double &tpPips)
       default:
          return false;
    }
+}
+
+bool GetModeFixedPips(ModeState mode, double &slPips, double &tpPips)
+{
+   if(mode == MODE_RANGE)
+   {
+      slPips = InpRangeSLPips;
+      tpPips = InpRangeTPPips;
+      return (slPips > 0.0 && tpPips > 0.0);
+   }
+   return GetFixedPipSet(InpFixedPipSetTrend, slPips, tpPips);
 }
 
 bool ValidateStops(double entryPrice, double sl, double tp)
@@ -530,25 +546,6 @@ int OnInit()
       return INIT_FAILED;
    }
    PrintFormat("Exit mode: TP/SL only=%s", InpExitTPOnly ? "ON" : "OFF");
-   if(InpUseFixedPips)
-   {
-      double slPips = 0.0;
-      double tpPips = 0.0;
-      if(GetFixedPipSet(slPips, tpPips))
-      {
-         PrintFormat("Fixed pips set=%d SL=%.1f TP=%.1f ATR range=%.2f-%.2f MaxSpread=%.2f pips",
-                     InpFixedPipSet, slPips, tpPips,
-                     slPips * InpATRMinSLMult, slPips * InpATRMaxSLMult,
-                     InpMaxSpreadPips);
-         PrintFormat("Fixed TP1 percent=%.1f TP1Close%%=%.1f",
-                     MathMax(0.0, MathMin(InpTP1FixedPercent, 100.0)),
-                     InpUseTP1 ? InpTP1ClosePercent : 0.0);
-      }
-      else
-      {
-         PrintFormat("Fixed pips set=%d invalid", InpFixedPipSet);
-      }
-   }
    if(InpUseModeRR)
    {
       PrintFormat("RR Trend: TP1RR=%.2f TP2RR=%.2f TP1%%=%.1f EffRR=%.2f",
@@ -563,6 +560,28 @@ int OnInit()
       PrintFormat("RR: TP1RR=%.2f TP2RR=%.2f TP1%%=%.1f EffRR=%.2f",
                   InpTP1RR, InpTP2RR, InpTP1ClosePercent,
                   EffectiveRR(InpTP1RR, InpTP2RR, InpTP1ClosePercent));
+   }
+   if(InpUseFixedPips)
+   {
+      double slPips = 0.0;
+      double tpPips = 0.0;
+      if(GetFixedPipSet(InpFixedPipSetTrend, slPips, tpPips))
+      {
+         PrintFormat("Fixed trend set=%d SL=%.1f TP=%.1f ATR range=%.2f-%.2f",
+                     InpFixedPipSetTrend, slPips, tpPips,
+                     slPips * InpATRMinSLMult, slPips * InpATRMaxSLMult);
+      }
+      PrintFormat("Fixed range SL=%.1f TP=%.1f ATR range=%.2f-%.2f allow_range=%s",
+                  InpRangeSLPips, InpRangeTPPips,
+                  InpRangeSLPips * InpATRMinSLMult, InpRangeSLPips * InpATRMaxSLMult,
+                  InpAllowRangeEntries ? "ON" : "OFF");
+      PrintFormat("Fixed filters: spread_pips=%s atr_range=%s max_spread=%.2f",
+                  InpUseSpreadPipsFilter ? "ON" : "OFF",
+                  InpUseATRRangeFilter ? "ON" : "OFF",
+                  InpMaxSpreadPips);
+      PrintFormat("Fixed TP1 percent=%.1f TP1Close%%=%.1f",
+                  MathMax(0.0, MathMin(InpTP1FixedPercent, 100.0)),
+                  InpUseTP1 ? InpTP1ClosePercent : 0.0);
    }
    ArrayInitialize(skipCounts, 0);
    return INIT_SUCCEEDED;
@@ -600,7 +619,7 @@ void OnTick()
 
    if(spreadPoints > InpMaxSpreadPoints)
       skip = SKIP_SPREAD;
-   if(skip == SKIP_NONE && InpMaxSpreadPips > 0.0 && spreadPips > InpMaxSpreadPips)
+   if(skip == SKIP_NONE && InpUseSpreadPipsFilter && InpMaxSpreadPips > 0.0 && spreadPips > InpMaxSpreadPips)
       skip = SKIP_SPREAD;
    else if(!SessionAllowed(TimeCurrent()))
       skip = SKIP_TIME;
@@ -612,7 +631,7 @@ void OnTick()
    if(!erOk)
       skip = SKIP_INVALID_HANDLE;
    currentMode = UpdateMode(er);
-   if(skip == SKIP_NONE && currentMode == MODE_RANGE)
+   if(skip == SKIP_NONE && currentMode == MODE_RANGE && !InpAllowRangeEntries)
       skip = SKIP_RANGE;
 
    bool trendOk = true;
@@ -637,11 +656,11 @@ void OnTick()
    double fixedTpPips = 0.0;
    if(skip == SKIP_NONE && InpUseFixedPips)
    {
-      if(!GetFixedPipSet(fixedSlPips, fixedTpPips))
+      if(!GetModeFixedPips(currentMode, fixedSlPips, fixedTpPips))
       {
-         skip = SKIP_NO_SIGNAL;
+         skip = SKIP_INVALID_HANDLE;
       }
-      else
+      else if(InpUseATRRangeFilter)
       {
          double atrPips = PointsToPips(atr / _Point);
          double minAtr = fixedSlPips * InpATRMinSLMult;
